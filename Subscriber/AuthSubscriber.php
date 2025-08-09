@@ -96,8 +96,10 @@ class AuthSubscriber implements SubscriberInterface
 
         /** Not locked yet, show remaining attempts */
         if (!$result['locked'] && $result['attempts_remaining']) {
-            $remainingAttempts = sprintf((string)$snippets->get('account/login/remaining'), $result['attempts_remaining'], $result['max_attempts']);
+            $remainingText = $snippets->get('account/login/remaining') ?? '';
+            $remainingAttempts = sprintf($remainingText, $result['attempts_remaining'], $result['max_attempts']);
             $return[0][] = $remainingAttempts;
+
             $args->setReturn($return);
             $session->set('EcSecureLoginResult', null);
             return;
@@ -111,11 +113,15 @@ class AuthSubscriber implements SubscriberInterface
 
             $remaining = $now->diff(new DateTime($then->format('Y-m-d H:i:s')));
 
-            $lockMessage = sprintf((string)$snippets->get('account/login/locked/until'), $then->format('j.n.Y'), $then->format('H:i'));
+            $lockText = $snippets->get('account/login/locked/until') ?? '';
+            $lockMessage = sprintf($lockText, $then->format('j.n.Y'), $then->format('H:i'));
             $return[0][] = $lockMessage;
-            $return[0][] = sprintf((string)$snippets->get('account/login/locked/counter'),
-                $remaining->h, $remaining->i, $remaining->s
-            );
+
+            $counter  = $snippets->get('account/login/locked/until') ?? '';
+            $return[0][] = sprintf($counter,
+                    $remaining->h, $remaining->i, $remaining->s
+                );
+
             $args->setReturn($return);
             $session->set('EcSecureLoginResult', null);
         }
