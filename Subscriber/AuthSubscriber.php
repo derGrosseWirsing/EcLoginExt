@@ -117,7 +117,7 @@ class AuthSubscriber implements SubscriberInterface
             $lockMessage = sprintf($lockText, $then->format('j.n.Y'), $then->format('H:i'));
             $return[0][] = $lockMessage;
 
-            $counter  = $snippets->get('account/login/locked/until') ?? '';
+            $counter  = $snippets->get('account/login/locked/counter') ?? '';
             $return[0][] = sprintf($counter,
                     $remaining->h, $remaining->i, $remaining->s
                 );
