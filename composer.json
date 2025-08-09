@@ -1,0 +1,10 @@
+{
+  "name": "dergrossewirsing/ec-login-ext",
+  "description": "Login Erweiterung für Shopware 5",
+  "type": "shopware-plugin",
+  "license": "MIT",
+  "require": {},
+  "extra": {
+    "installer-name": "EcLoginExt"
+  }
+}
