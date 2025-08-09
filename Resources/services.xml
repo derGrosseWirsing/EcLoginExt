@@ -5,6 +5,8 @@
 
     <imports>
         <import resource="subscriber.xml"/>
+        <import resource="controllers.xml"/>
+        <import resource="decorates.xml"/>
     </imports>
 
     <services>
@@ -15,13 +17,8 @@
             <argument type="service" id="models"/>
             <argument type="service" id="templatemail"/>
             <argument type="service" id="front"/>
-        </service>
-
-        <!-- Controllers -->
-        <service id="ec_login_ext.controller.unlock"
-                 class="EcLoginExt\Controllers\Frontend\EcUnlock"
-                 public="true">
-            <argument type="service" id="ec_login_ext.service.login_security"/>
+            <argument type="service" id="service_container"/>
+            <argument type="service" id="Shopware\Components\ContainerAwareEventManager"/>
         </service>
     </services>
 </container>

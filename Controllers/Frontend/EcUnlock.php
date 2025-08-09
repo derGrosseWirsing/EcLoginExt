@@ -7,9 +7,11 @@ use Shopware\Models\Customer\Customer;
 use Doctrine\ORM\EntityManager;
 
 /**
- * Account Unlock Controller
- * 
- * Handles account unlock functionality via email tokens
+ * Shopware Controller for handling account unlock via email token
+ * This controller is responsible for processing the unlock request,
+ * validating the token, and unlocking the customer account.
+ * It uses the LoginSecurityService to perform the unlock operation
+ * and interacts with the session to store success or error messages.
  */
 class Shopware_Controllers_Frontend_EcUnlock extends Enlight_Controller_Action
 {
@@ -27,31 +29,40 @@ class Shopware_Controllers_Frontend_EcUnlock extends Enlight_Controller_Action
      * Handle account unlock via email token
      */
     public function indexAction(): void
-    {
+    {   $this->Front()->Plugins()->ViewRenderer()->setNoRender();
         $token = $this->Request()->getParam('token');
         $loginSecurityService = $this->loginSecurityService;
-        $session = Shopware()->Session();
-        $this->snippetManager = Shopware()->Snippets();
+        $session = $this->container->get('session');
+        $this->snippetManager = $this->container->get('snippets');
         $snippets = $this->snippetManager->getNamespace('frontend/ec_login_ext');
 
+        /**
+         * Check if token is provided
+         * If not, redirect to login with error message
+         */
         if (empty($token)) {
-            // Store error message in session for cross-controller persistence
+            /** Store error message in session for cross-controller persistence */
             $session->set('sErrorFlag', ['token' => true]);
-            $session->set('sErrorMessages',$this->getErrorMessage('invalid_token'));
+            $session->set('sErrorMessages', [$this->getErrorMessage('invalid_token')]);
 
             $this->redirect([
                 'controller' => 'account',
                 'action' => 'login'
             ]);
+
             return;
         }
 
         $result = $loginSecurityService->unlockWithToken($token);
 
+        /**
+         * Check if unlock was successful
+         * If not, redirect to login with appropriate error message
+         */
         if (!$result['success']) {
             $errorMessage = $this->getErrorMessage($result['error']);
 
-            // Store error message in session for cross-controller persistence
+            /** Store error message in session for cross-controller persistence */
             $session->set('sErrorFlag', ['token' => true]);
             $session->set('sErrorMessages', [$errorMessage]);
 
@@ -59,10 +70,11 @@ class Shopware_Controllers_Frontend_EcUnlock extends Enlight_Controller_Action
                 'controller' => 'account',
                 'action' => 'login'
             ]);
+
             return;
         }
 
-        // Success - store success message in session
+        /** Success - store success message in session */
         $session->set('sSuccessFlag', true);
         $session->set('sSuccessMessages', [$snippets->get('account/unlocked/success')]);
 
@@ -72,28 +84,6 @@ class Shopware_Controllers_Frontend_EcUnlock extends Enlight_Controller_Action
         ]);
     }
 
-    /**
-     * Get customer by unlock token (helper method)
-     */
-    private function getCustomerByToken(string $token): ?Customer
-    {
-        if (!$this->em) {
-            return null;
-        }
-        
-        $qb = $this->em->createQueryBuilder();
-        $qb->select('c')
-            ->from(Customer::class, 'c')
-            ->leftJoin('c.attribute', 'a')
-            ->where('a.ecUnlockToken = :token')
-            ->setParameter('token', $token);
-
-        try {
-            return $qb->getQuery()->getOneOrNullResult();
-        } catch (Exception) {
-            return null;
-        }
-    }
 
     /**
      * Get user-friendly error message for unlock errors
@@ -108,9 +98,9 @@ class Shopware_Controllers_Frontend_EcUnlock extends Enlight_Controller_Action
             case 'token_not_found':
                 return $snippets->get('account/unlocked/not_found');
             case 'token_expired':
-                return  $snippets->get('account/unlocked/expired');
+                return $snippets->get('account/unlocked/expired');
             default:
-                return  $snippets->get('account/unlocked/error');
+                return $snippets->get('account/unlocked/error');
         }
     }
 }

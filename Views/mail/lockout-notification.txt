@@ -1,0 +1,15 @@
+{include file="string:{config name=emailheaderplain}"}
+Hallo {$customerName},
+
+Ihr Account wurde wegen zu vieler Anmeldeversuch vorübergehend gesperrt.
+
+Ihr Konto wird in {$lockDuration} wieder entsperrt.
+
+Sie können Ihr Konto auch sofort mit diesem Link entsperren:
+{$unlockUrl}
+
+Fall Sie sich nicht versucht haben, in Ihr Konto einzuloggen, kontaktieren Sie bitte unseren Support.
+
+Mit besten Grüßen,
+
+{include file="string:{config name=emailfooterplain}"}

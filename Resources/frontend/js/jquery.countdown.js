@@ -1,6 +1,15 @@
 (function ($) {
     'use strict';
 
+    /**
+     * jQuery Plugin for a simple countdown timer
+     * This plugin allows you to create a countdown timer that displays hours, minutes, and seconds.
+     * It updates the display every second and stops when the countdown reaches zero.
+     * Usage:
+     * <div class="countdown" data-hours="1" data-minutes="30" data-seconds="45">
+     *     <span class="hours"></span>:<span class="minutes"></span>:<span class="seconds"></span>
+     * </div>
+     */
     $.plugin('swCountDown', {
 
         defaults: {
@@ -11,32 +20,24 @@
             minutes: 0,
             seconds: 0
         },
-
-        /**
-         * Initializes the plugin and register its events
-         *
-         * @public
-         * @method init
-         */
         init: function () {
             var me = this;
-
             me.applyDataAttributes();
 
-            // Validierung der Eingabewerte
-            me.opts.hours = Math.max(0, parseInt(me.opts.hours) || 0);
-            me.opts.minutes = Math.max(0, parseInt(me.opts.minutes) || 0);
-            me.opts.seconds = Math.max(0, parseInt(me.opts.seconds) || 0);
-
-            // DOM-Elemente finden
+            /** Check DOM-Elements */
             me.$hours = me.$el.find(me.opts.hourSelector);
             me.$minutes = me.$el.find(me.opts.minuteSelector);
             me.$seconds = me.$el.find(me.opts.secondSelector);
 
-            // Prüfen ob DOM-Elemente existieren
+            /** Abort if any of the required elements are missing */
             if (me.$hours.length === 0 || me.$minutes.length === 0 || me.$seconds.length === 0) {
                 return;
             }
+
+            /** validation: always use non negative integers */
+            me.opts.hours = Math.max(0, parseInt(me.opts.hours) || 0);
+            me.opts.minutes = Math.max(0, parseInt(me.opts.minutes) || 0);
+            me.opts.seconds = Math.max(0, parseInt(me.opts.seconds) || 0);
 
             me.totalSeconds = (me.opts.hours * 3600) + (me.opts.minutes * 60) + me.opts.seconds;
             me.timer = null;
@@ -44,7 +45,7 @@
             me.lastMinutes = null;
             me.lastSeconds = null;
 
-            // Initial display update
+            /** Initial display update */
             me.updateDisplay();
             me.registerEvents();
             me.startCountdown();
@@ -53,9 +54,9 @@
         registerEvents: function () {
             var me = this;
 
-            // Subscribe mit eindeutigem Namespace basierend auf Element
-            me.eventNamespace = 'plugin/swCountDown/' + (me.$el.attr('id') || me.$el.index());
-
+            /**
+             * onTick fired after every interval tick
+             */
             $.subscribe(me.eventNamespace + '/onTick', function() {
                 me.updateDisplay();
             });
@@ -65,7 +66,6 @@
             var me = this;
 
             if (me.totalSeconds <= 0) {
-                $.publish(me.eventNamespace + '/onComplete', [me]);
                 return;
             }
 
@@ -73,11 +73,12 @@
                 if (me.totalSeconds <= 0) {
                     clearInterval(me.timer);
                     me.timer = null;
-                    $.publish(me.eventNamespace + '/onComplete', [me]);
                     return;
                 }
 
                 me.totalSeconds--;
+
+                /** Fire the onTick event to update the display */
                 $.publish(me.eventNamespace + '/onTick', [me]);
             }, 1000);
         },
@@ -93,12 +94,12 @@
             var minutes = Math.floor((me.totalSeconds % 3600) / 60);
             var seconds = me.totalSeconds % 60;
 
+            /** leading zeros */
+            var hoursText = hours.toString().padStart(2, '0');
+            var minutesText = minutes.toString().padStart(2, '0');
+            var secondsText = seconds.toString().padStart(2, '0');
 
-            var hoursText = (hours < 10 ? '0' : '') + hours;
-            var minutesText = (minutes < 10 ? '0' : '') + minutes;
-            var secondsText = (seconds < 10 ? '0' : '') + seconds;
-
-            // Nur updaten wenn sich der Wert geändert hat
+            /** do update only if the text has changed (to avoid unnecessary DOM updates => micro performance improvement) */
             if (me.lastHours !== hoursText) {
                 me.$hours.text(hoursText);
                 me.lastHours = hoursText;
@@ -114,63 +115,21 @@
                 me.lastSeconds = secondsText;
             }
         },
-
-        pause: function() {
-            var me = this;
-
-            if (me.timer) {
-                clearInterval(me.timer);
-                me.timer = null;
-            }
-        },
-
-        resume: function() {
-            var me = this;
-
-            if (!me.timer && me.totalSeconds > 0) {
-                me.startCountdown();
-            }
-        },
-
-        reset: function(hours, minutes, seconds) {
-            var me = this;
-
-            me.pause();
-
-            if (typeof hours !== 'undefined') {
-                me.opts.hours = Math.max(0, parseInt(hours) || 0);
-            }
-
-            if (typeof minutes !== 'undefined') {
-                me.opts.minutes = Math.max(0, parseInt(minutes) || 0);
-            }
-
-            if (typeof seconds !== 'undefined') {
-                me.opts.seconds = Math.max(0, parseInt(seconds) || 0);
-            }
-
-            me.totalSeconds = (me.opts.minutes * 60) + me.opts.seconds;
-            me.lastHours = null;
-            me.lastMinutes = null;
-            me.lastSeconds = null;
-            me.updateDisplay();
-        },
-
         destroy: function () {
             var me = this;
 
-            // Timer stoppen
+            /** Stop and remove the timer */
             if (me.timer) {
                 clearInterval(me.timer);
                 me.timer = null;
             }
 
-            // Event-Listener aufräumen
+            /**  Clear the event subscription */
             if (me.eventNamespace) {
                 $.unsubscribe(me.eventNamespace + '/onTick');
             }
 
-            // DOM-Referenzen löschen
+            /** Clear DOM references */
             me.$hours = null;
             me.$minutes = null;
             me.$seconds = null;

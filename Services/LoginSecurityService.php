@@ -9,27 +9,32 @@ use DateTime;
 use Doctrine\ORM\AbstractQuery;
 use Doctrine\ORM\EntityManager;
 use EcLoginExt\EcLoginExt;
-use EcLoginExt\Subscriber\AuthSubscriber;
 use Enlight_Controller_Front;
+use Enlight_Event_EventManager;
+use Exception;
+use Shopware\Components\DependencyInjection\Container;
 use Shopware\Models\Customer\Customer;
 use Shopware_Components_TemplateMail;
 
 /**
- * Login Security Service
- * 
- * Handles security logic for failed login attempts including:
- * - Account locking based on configurable thresholds
- * - Email notifications with unlock tokens
- * - Security event logging
+ * Class LoginSecurityService
+ *
+ * Handles login security features like failed login tracking, account locking,
+ * and email notifications for account unlock.
+ *
+ * This service is designed to work with Shopware's customer model and
+ * integrates with the event system to allow for custom handling of login events.
  */
 class LoginSecurityService
 {
-     public function __construct(
+    public function __construct(
         private EntityManager                    $em,
         private Shopware_Components_TemplateMail $templateMail,
-        private Enlight_Controller_Front         $front
-    ) {
-
+        private Enlight_Controller_Front         $front,
+        private Container                        $container,
+        private Enlight_Event_EventManager       $eventManager
+    )
+    {
     }
 
     /**
@@ -37,7 +42,7 @@ class LoginSecurityService
      */
     private function getConfig(): array
     {
-        return Shopware()->Container()->get('shopware.plugin.cached_config_reader')
+        return $this->container->get('shopware.plugin.cached_config_reader')
             ->getByPluginName('EcLoginExt') ?: [];
     }
 
@@ -47,115 +52,35 @@ class LoginSecurityService
      */
     public function handleFailedLogin(string $email): array
     {
-        $config = $this->getConfig();
-        $maxAttempts = (int) ($config['maxAttempts'] ?? 3);
-        $lockDurationHours = (int) ($config['lockDurationHours'] ?? 24);
-        $enableEmailUnlock = $config['enableEmailUnlock'] ?? true;
-        $now = new DateTime();
+        /**
+         * Skip processing if event manager notifies to skip
+         * This allows other plugins to control whether we should process failed logins
+         */
+        if($this->shouldSkipProcessing($email)) {
+            return [];
+        }
 
-        // Single query to get all customer data we need
-        $customerData = $this->em->createQueryBuilder()
-            ->select([
-                'c.id',
-                'c.email', 
-                'c.firstname',
-                'c.lastname',
-                'ca.ecCurrentFailedAttempts',
-                'ca.ecTotalFailedAttempts', 
-                'ca.ecLockedUntil'
-            ])
-            ->from(Customer::class, 'c')
-            ->leftJoin('c.attribute', 'ca')
-            ->where('c.email = :email')
-            ->andWhere('c.accountMode = 0')
-            ->setParameter('email', $email)
-            ->getQuery()
-            ->getOneOrNullResult(AbstractQuery::HYDRATE_ARRAY);
-
+        $config = $this->getFailedLoginConfig();
+        /**
+         * Fetch customer data by email
+         * Can be filtered by other plugins using the event manager
+         */
+        $customerData = $this->getCustomerDataByEmail($email);
+        
         if (!$customerData) {
             return ['locked' => false, 'reason' => 'customer_not_found'];
         }
 
-        $customerId = (int) $customerData['id'];
-        $currentFailed = (int) ($customerData['ecCurrentFailedAttempts'] ?? 0);
-        $totalFailed = (int) ($customerData['ecTotalFailedAttempts'] ?? 0);
-        
-        // Parse lock time and check if customer is currently locked
-        $lockedUntil = $this->parseLockTime($customerData['ecLockedUntil'] ?? null);
-        $isAlreadyLocked = $lockedUntil && $lockedUntil > $now;
+        $lockState = $this->calculateLockState($customerData, $config['now']);
+        $newCounts = $this->calculateNewAttemptCounts($customerData, $lockState['isAlreadyLocked']);
 
-        // Prepare new attempt counts
-        $newTotalFailed = $totalFailed + 1;
-        $newCurrentFailed = $isAlreadyLocked ? $currentFailed : $currentFailed + 1;
-        
-        // Use transaction for atomic updates
-        $this->em->beginTransaction();
-        try {
-            // Reset Shopware's counter and update our counters in one batch
-            $this->updateCustomerCounters($customerId, 0, $newCurrentFailed, $newTotalFailed);
-
-            if ($isAlreadyLocked) {
-                // Customer already locked - sync lock time and log
-                $this->synchronizeNativeLockField($customerId, $lockedUntil);
-                
-                $this->em->commit();
-                
-                $this->logSecurityEventById('login_failed_while_locked', $customerId, $customerData['email'], [
-                    'total_failed_attempts' => $newTotalFailed,
-                    'current_failed_attempts' => $currentFailed,
-                    'lock_until' => $lockedUntil->format('Y-m-d H:i:s')
-                ]);
-
-                return $this->createLockedResponse($lockedUntil, $currentFailed, $maxAttempts, $newTotalFailed, 'already_locked', false);
-            }
-
-            // Check if we should lock the customer now
-            if ($newCurrentFailed >= $maxAttempts) {
-                $lockUntil = (clone $now)->add(new DateInterval('PT' . $lockDurationHours . 'H'));
-                
-                // Lock customer and generate token if needed
-                $this->lockCustomerWithToken($customerId, $lockUntil, $enableEmailUnlock, $config);
-                
-                $this->em->commit();
-                
-                // Send notification email if enabled (after commit to avoid issues if email fails)
-                if ($enableEmailUnlock) {
-                    $customer = $this->em->find(Customer::class, $customerId);
-                    if ($customer && $customer->getAttribute() && $customer->getAttribute()->getEcUnlockToken()) {
-                        $this->sendLockoutNotification($customer, $lockDurationHours);
-                    }
-                }
-
-                $this->logSecurityEventById('account_locked', $customerId, $customerData['email'], [
-                    'total_failed_attempts' => $newTotalFailed,
-                    'current_failed_attempts' => $newCurrentFailed,
-                    'lock_until' => $lockUntil->format('Y-m-d H:i:s'),
-                    'max_attempts_configured' => $maxAttempts
-                ]);
-
-                return $this->createLockedResponse($lockUntil, $newCurrentFailed, $maxAttempts, $newTotalFailed, 'max_attempts_reached', $enableEmailUnlock);
-            } else {
-                // Just track the attempt
-                $this->em->commit();
-                
-                $this->logSecurityEventById('login_failed', $customerId, $customerData['email'], [
-                    'total_failed_attempts' => $newTotalFailed,
-                    'current_failed_attempts' => $newCurrentFailed,
-                    'attempts_remaining' => $maxAttempts - $newCurrentFailed
-                ]);
-
-                return [
-                    'locked' => false, 
-                    'attempts_remaining' => $maxAttempts - $newCurrentFailed,
-                    'attempts' => $newCurrentFailed,
-                    'max_attempts' => $maxAttempts,
-                    'total_failed_attempts' => $newTotalFailed
-                ];
-            }
-        } catch (\Exception $e) {
-            $this->em->rollback();
-            throw $e;
-        }
+        return $this->processFailedLoginInTransaction(
+            $customerData, 
+            $lockState, 
+            $newCounts, 
+            $config,
+            $email
+        );
     }
 
     /**
@@ -163,69 +88,17 @@ class LoginSecurityService
      */
     public function handleSuccessfulLogin(Customer $customer): void
     {
-        error_log('EcLoginExt DEBUG: handleSuccessfulLogin called for customer ID: ' . $customer->getId() . ', email: ' . $customer->getEmail());
-        
-        // Refresh customer to ensure we have latest data
         $this->em->refresh($customer);
-
+        
         $attribute = $customer->getAttribute();
         if (!$attribute) {
             return;
         }
 
-        // Always ensure Shopware's counter stays at 0
         $customer->setFailedLogins(0);
         
-        // Check if we need to unlock using our custom field with Query Builder
-        $lockData = $this->em->createQueryBuilder()
-            ->select('ca.ecCurrentFailedAttempts', 'ca.ecLockedUntil')
-            ->from('Shopware\Models\Customer\Customer', 'c')
-            ->leftJoin('c.attribute', 'ca')
-            ->where('c.id = :customerId')
-            ->setParameter('customerId', $customer->getId())
-            ->getQuery()
-            ->getArrayResult();
-        
-        $lockInfo = !empty($lockData) ? $lockData[0] : null;
-        $needsUnlock = ($lockInfo && ($lockInfo['ecCurrentFailedAttempts'] > 0 || !empty($lockInfo['ecLockedUntil'])));
-        
-        if ($needsUnlock) {
-            $lockedUntilValue = $lockInfo['ecLockedUntil'] ?? null;
-            $lockedUntilString = $lockedUntilValue instanceof DateTime ? $lockedUntilValue->format('Y-m-d H:i:s') : ($lockedUntilValue ?? 'NULL');
-            error_log('EcLoginExt DEBUG: UNLOCKING customer in handleSuccessfulLogin - was locked until: ' . $lockedUntilString);
-            
-            // Unlock customer using Query Builder and entity management
-            $this->em->beginTransaction();
-            try {
-                // Clear Shopware's lock fields
-                $this->em->createQueryBuilder()
-                    ->update(Customer::class, 'c')
-                    ->set('c.failedLogins', ':failedLogins')
-                    ->set('c.lockedUntil', ':lockedUntil')
-                    ->where('c.id = :customerId')
-                    ->setParameter('failedLogins', 0)
-                    ->setParameter('lockedUntil', null)
-                    ->setParameter('customerId', $customer->getId())
-                    ->getQuery()
-                    ->execute();
-                
-                // Clear our custom fields using entity management
-                $customer->setFailedLogins(0);
-                if ($attribute) {
-                    $attribute->setEcCurrentFailedAttempts(0);
-                    $attribute->setEcLockedUntil(null);
-                    $attribute->setEcUnlockToken(null);
-                    $attribute->setEcUnlockTokenExpires(null);
-                    $this->em->persist($attribute);
-                }
-                
-                $this->em->flush();
-                $this->em->commit();
-            } catch (\Exception $e) {
-                $this->em->rollback();
-                throw $e;
-            }
-            
+        if ($this->customerNeedsUnlock($customer->getId())) {
+            $this->unlockCustomerAfterSuccess($customer, $attribute);
             $this->logSecurityEvent('login_success_after_failures', $customer, null, [
                 'total_failed_attempts' => $attribute->getEcTotalFailedAttempts()
             ]);
@@ -233,38 +106,8 @@ class LoginSecurityService
     }
 
     /**
-     * Generate secure unlock token for customer (only if not already set)
-     */
-    private function generateUnlockToken(Customer $customer): void
-    {
-        $attribute = $customer->getAttribute();
-        if (!$attribute) {
-            return; // No attribute entity available
-        }
-
-        // Check if token already exists and is still valid
-        $existingToken = $attribute->getEcUnlockToken();
-        $existingExpiry = $attribute->getEcUnlockTokenExpires();
-        
-        if (!empty($existingToken) && $existingExpiry && $existingExpiry > new DateTime()) {
-            // Token already exists and is still valid, don't generate a new one
-            return;
-        }
-
-        // Generate new token only if none exists or the existing one has expired
-        $token = bin2hex(random_bytes(32)); // 64 character secure token
-        $config = $this->getConfig();
-        $expiryHours = (int) ($config['unlockTokenExpiryHours'] ?? 24);
-        
-        $expires = new DateTime();
-        $expires->add(new DateInterval('PT' . $expiryHours . 'H'));
-        
-        $attribute->setEcUnlockToken($token);
-        $attribute->setEcUnlockTokenExpires($expires);
-    }
-
-    /**
      * Unlock account using token
+     * @todo : If queryBuilder a performance issue, consider using native SQL
      */
     public function unlockWithToken(string $token): array
     {
@@ -279,12 +122,16 @@ class LoginSecurityService
 
         $attribute = $customer->getAttribute();
         $expires = $attribute->getEcUnlockTokenExpires();
-        
+
         if (!$expires || $expires < new DateTime()) {
             return ['success' => false, 'error' => 'token_expired'];
         }
 
-        // Unlock customer using Query Builder
+        /**
+         * Unlock customer using Query Builder
+         * @see: https://www.doctrine-project.org/projects/doctrine-orm/en/3.5/reference/transactions-and-concurrency.html
+         * @todo : If queryBuilder is a performance issue, consider using native SQL
+         */
         $this->em->beginTransaction();
         try {
             // Clear Shopware's lock fields
@@ -298,9 +145,7 @@ class LoginSecurityService
                 ->setParameter('customerId', $customer->getId())
                 ->getQuery()
                 ->execute();
-            
-            // Clear our custom fields in attributes
-            $attribute = $customer->getAttribute();
+
             if ($attribute) {
                 $attribute->setEcCurrentFailedAttempts(0);
                 $attribute->setEcLockedUntil(null);
@@ -308,10 +153,10 @@ class LoginSecurityService
                 $attribute->setEcUnlockTokenExpires(null);
                 $this->em->persist($attribute);
             }
-            
+
             $this->em->flush();
             $this->em->commit();
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             $this->em->rollback();
             throw $e;
         }
@@ -321,13 +166,18 @@ class LoginSecurityService
 
     /**
      * Send lockout notification email
+     * This method constructs the email content using a template
+     * and sends it to the customer when their account is locked.
+     * It uses the template mail service to create and send the email.
+     *
+     * A filter is applied to allow other plugins to modify the mail before sending.
+     *
      */
     private function sendLockoutNotification(Customer $customer, int $lockDurationHours): void
     {
         $attribute = $customer->getAttribute();
 
         if (!$attribute || empty($attribute->getEcUnlockToken())) {
-            error_log('EcLoginExt: Cannot send lockout notification - no unlock token available');
             return;
         }
 
@@ -347,10 +197,16 @@ class LoginSecurityService
 
         try {
             $mail = $this->templateMail->createMail('sECSECURELOGINLOCKOUT', $context, $customer->getShop());
+
+            $mail = $this->eventManager->filter('LoginSecurityService.sendLockoutNotificationMailFilter', $mail, [
+                'customer' => $customer,
+                'context' => $context
+            ]);
+
             $mail->addTo($customer->getEmail());
             $mail->send();
-            
-        } catch (\Exception $e) {
+
+        } catch (Exception $e) {
             error_log('EcLoginExt: Failed to send lockout notification: ' . $e->getMessage());
         }
     }
@@ -358,35 +214,14 @@ class LoginSecurityService
     /**
      * Log security events
      */
-    private function logSecurityEvent(string $event, Customer $customer, array $data = []): void
+    private function logSecurityEvent(string $event, Customer $customer, ?int $customerId = null, array $data = []): void
     {
-        $config = $this->getConfig();
-        if (!($config['logSecurityEvents'] ?? true)) {
-            return;
-        }
-
-        $logData = [
-            'event' => $event,
-            'customer_id' => $customer->getId(),
-            'customer_email' => $customer->getEmail(),
-            'timestamp' => date('Y-m-d H:i:s'),
-            'data' => $data
-        ];
-
-        error_log('EcLoginExt: ' . json_encode($logData));
-    }
-
-    /**
-     * Get customer by email
-     */
-    private function getCustomerByEmail(string $email): ?Customer
-    {
-        return $this->em->getRepository(Customer::class)
-            ->findOneBy(['email' => $email]);
+        $this->logSecurityEventById($event, $customerId ?? $customer->getId(), $customer->getEmail(), $data);
     }
 
     /**
      * Get customer by unlock token
+     * @todo : If queryBuilder is a performance issue, consider using native SQL
      */
     private function getCustomerByUnlockToken(string $token): ?Customer
     {
@@ -399,7 +234,7 @@ class LoginSecurityService
 
         try {
             return $qb->getQuery()->getOneOrNullResult();
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             return null;
         }
     }
@@ -415,8 +250,8 @@ class LoginSecurityService
         }
 
         $lockedUntil = $attribute->getEcLockedUntil();
-        
-        // Check if our custom locked field is set and is in the future
+
+        /** Check if our custom locked field is set and is in the future */
         if ($lockedUntil instanceof DateTime) {
             $now = new DateTime();
             return $lockedUntil > $now;
@@ -425,68 +260,23 @@ class LoginSecurityService
         return false;
     }
 
-    /**
-     * Generate unlock token using Query Builder and entity management
-     */
-    private function generateUnlockTokenById(int $customerId, array $config): void
-    {
-        // Get customer with attributes using Query Builder
-        $customerData = $this->em->createQueryBuilder()
-            ->select('ca.ecUnlockToken', 'ca.ecUnlockTokenExpires')
-            ->from(Customer::class, 'c')
-            ->leftJoin('c.attribute', 'ca')
-            ->where('c.id = :customerId')
-            ->setParameter('customerId', $customerId)
-            ->getQuery()
-            ->getArrayResult();
-        
-        $tokenInfo = !empty($customerData) ? $customerData[0] : null;
-        
-        // Check if token already exists and is still valid
-        if ($tokenInfo && 
-            !empty($tokenInfo['ecUnlockToken']) && 
-            $tokenInfo['ecUnlockTokenExpires'] && 
-            $this->parseLockTime($tokenInfo['ecUnlockTokenExpires']) > new DateTime()) {
-            // Token already exists and is still valid
-            return;
-        }
-
-        // Generate new token using entity management
-        $customer = $this->em->find(Customer::class, $customerId);
-        if ($customer && $customer->getAttribute()) {
-            $token = bin2hex(random_bytes(32));
-            $expiryHours = (int) ($config['unlockTokenExpiryHours'] ?? 24);
-            
-            $expires = new DateTime();
-            $expires->add(new DateInterval('PT' . $expiryHours . 'H'));
-            
-            $attribute = $customer->getAttribute();
-            $attribute->setEcUnlockToken($token);
-            $attribute->setEcUnlockTokenExpires($expires);
-            $this->em->persist($attribute);
-            $this->em->flush();
-        }
-    }
 
     /**
      * Log security events with customer ID
      */
     private function logSecurityEventById(string $event, int $customerId, string $email, array $data = []): void
     {
-        $config = $this->getConfig();
-        if (!($config['logSecurityEvents'] ?? true)) {
+        if (!($this->getConfig()['logSecurityEvents'] ?? true)) {
             return;
         }
 
-        $logData = [
+        error_log('EcLoginExt: ' . json_encode([
             'event' => $event,
             'customer_id' => $customerId,
             'customer_email' => $email,
             'timestamp' => date('Y-m-d H:i:s'),
             'data' => $data
-        ];
-
-        error_log('EcLoginExt: ' . json_encode($logData));
+        ]));
     }
 
     /**
@@ -507,7 +297,7 @@ class LoginSecurityService
         if (is_string($lockTime)) {
             try {
                 return new DateTime($lockTime);
-            } catch (\Exception $e) {
+            } catch (Exception $e) {
                 error_log('EcLoginExt: Failed to parse lock time: ' . $e->getMessage());
                 return null;
             }
@@ -516,72 +306,10 @@ class LoginSecurityService
         return null;
     }
 
-    /**
-     * Update failed login counter in s_user table
-     */
-    private function updateFailedLoginsCounter(int $customerId, int $count): void
-    {
-        $this->em->createQueryBuilder()
-            ->update(Customer::class, 'c')
-            ->set('c.failedLogins', ':count')
-            ->where('c.id = :customerId')
-            ->setParameter('count', $count)
-            ->setParameter('customerId', $customerId)
-            ->getQuery()
-            ->execute();
-    }
-
-    /**
-     * Update failed attempts in s_user_attributes table
-     */
-    private function updateFailedAttempts(int $customerId, int $currentFailed, int $totalFailed): void
-    {
-        // Find the customer and update attributes using entity management
-        $customer = $this->em->find(Customer::class, $customerId);
-        if ($customer && $customer->getAttribute()) {
-            $attribute = $customer->getAttribute();
-            $attribute->setEcCurrentFailedAttempts($currentFailed);
-            $attribute->setEcTotalFailedAttempts($totalFailed);
-            $this->em->persist($attribute);
-            $this->em->flush();
-        }
-    }
-
-    /**
-     * Lock customer by setting both custom and Shopware lock fields
-     */
-    private function lockCustomer(int $customerId, DateTime $lockUntil): void
-    {
-        $this->em->beginTransaction();
-        try {
-            // Update Shopware's lock field using Query Builder
-            $this->em->createQueryBuilder()
-                ->update(Customer::class, 'c')
-                ->set('c.lockedUntil', ':lockUntil')
-                ->where('c.id = :customerId')
-                ->setParameter('lockUntil', $lockUntil)
-                ->setParameter('customerId', $customerId)
-                ->getQuery()
-                ->execute();
-
-            // Set our custom lock field using entity management
-            $customer = $this->em->find(Customer::class, $customerId);
-            if ($customer && $customer->getAttribute()) {
-                $attribute = $customer->getAttribute();
-                $attribute->setEcLockedUntil($lockUntil);
-                $this->em->persist($attribute);
-                $this->em->flush();
-            }
-
-            $this->em->commit();
-        } catch (\Exception $e) {
-            $this->em->rollback();
-            throw $e;
-        }
-    }
 
     /**
      * Update customer counters in a single batch operation
+     * @todo : If queryBuilder a performance issue, consider using native SQL
      */
     private function updateCustomerCounters(int $customerId, int $shopwareCounter, int $currentFailed, int $totalFailed): void
     {
@@ -608,6 +336,10 @@ class LoginSecurityService
 
     /**
      * Synchronize our custom lock time to Shopware's native field
+     * since Shopware updates the lockedUntil field automatically at every login attempt
+     * and we need to ensure it matches our custom ecLockedUntil field.
+     * This is a workaround to ensure consistency between our custom field and Shopware's native lock
+     * @todo : If queryBuilder a performance issue, consider using native SQL
      */
     private function synchronizeNativeLockField(int $customerId, DateTime $lockedUntil): void
     {
@@ -623,10 +355,11 @@ class LoginSecurityService
 
     /**
      * Lock customer and generate token if needed (combined operation)
+     * @todo : If queryBuilder a performance issue, consider using native SQL
      */
     private function lockCustomerWithToken(int $customerId, DateTime $lockUntil, bool $enableEmailUnlock, array $config): void
     {
-        // Update Shopware's lock field using Query Builder
+        /**  Update Shopware's lock field  */
         $this->em->createQueryBuilder()
             ->update(Customer::class, 'c')
             ->set('c.lockedUntil', ':lockUntil')
@@ -636,24 +369,344 @@ class LoginSecurityService
             ->getQuery()
             ->execute();
 
-        // Set our custom lock field and generate token using entity management
+        /** Set our custom lock field and generate token */
         $customer = $this->em->find(Customer::class, $customerId);
         if ($customer && $customer->getAttribute()) {
             $attribute = $customer->getAttribute();
             $attribute->setEcLockedUntil($lockUntil);
-            
-            // Generate unlock token if email unlock is enabled
+
+            /** Generate unlock token if email unlock is enabled */
             if ($enableEmailUnlock) {
                 $token = bin2hex(random_bytes(32));
-                $expiryHours = (int) ($config['unlockTokenExpiryHours'] ?? 24);
+                $expiryHours = (int)($config['unlockTokenExpiryHours'] ?? 24);
                 $expires = (clone $lockUntil)->add(new DateInterval('PT' . $expiryHours . 'H'));
-                
+
                 $attribute->setEcUnlockToken($token);
                 $attribute->setEcUnlockTokenExpires($expires);
             }
-            
+
             $this->em->persist($attribute);
             $this->em->flush();
+        }
+    }
+
+    /**
+     * Check if processing should be skipped
+     */
+    private function shouldSkipProcessing(string $email): bool
+    {
+        $break = $this->eventManager->notifyUntil(
+            'EcLoginExt.handleFailedLoginNotifyUntil',
+            ['email' => $email]
+        );
+        return (bool) $break;
+    }
+
+    /**
+     * Get configuration for failed login handling
+     */
+    private function getFailedLoginConfig(): array
+    {
+        $config = $this->getConfig();
+        return [
+            'maxAttempts' => (int)($config['maxAttempts'] ?? 3),
+            'lockDurationHours' => (int)($config['lockDurationHours'] ?? 24),
+            'enableEmailUnlock' => $config['enableEmailUnlock'] ?? true,
+            'now' => new DateTime()
+        ];
+    }
+
+    /**
+     * Get customer data by email
+     * @todo : If queryBuilder a performance issue, consider using native SQL
+     */
+    private function getCustomerDataByEmail(string $email): ?array
+    {
+        $customerData = $this->em->createQueryBuilder()
+            ->select([
+                'c.id',
+                'c.email',
+                'c.firstname',
+                'c.lastname',
+                'ca.ecCurrentFailedAttempts',
+                'ca.ecTotalFailedAttempts',
+                'ca.ecLockedUntil'
+            ])
+            ->from(Customer::class, 'c')
+            ->leftJoin('c.attribute', 'ca')
+            ->where('c.email = :email')
+            ->andWhere('c.accountMode = 0')
+            ->setParameter('email', $email)
+            ->getQuery()
+            ->getOneOrNullResult(AbstractQuery::HYDRATE_ARRAY);
+
+        return $this->eventManager->filter(
+            'EcLoginExt.handleFailedLoginOnFilterCustomerData',
+            $customerData,
+            ['email' => $email]
+        );
+    }
+
+    /**
+     * Calculate lock state for customer
+     * is already locked or not, and until when
+     */
+    private function calculateLockState(array $customerData, DateTime $now): array
+    {
+        $lockedUntil = $this->parseLockTime($customerData['ecLockedUntil'] ?? null);
+        $isAlreadyLocked = $lockedUntil && $lockedUntil > $now;
+        
+        return [
+            'lockedUntil' => $lockedUntil,
+            'isAlreadyLocked' => $isAlreadyLocked
+        ];
+    }
+
+    /**
+     * Calculate new attempt counts
+     */
+    private function calculateNewAttemptCounts(array $customerData, bool $isAlreadyLocked): array
+    {
+        $currentFailed = (int)($customerData['ecCurrentFailedAttempts'] ?? 0);
+        $totalFailed = (int)($customerData['ecTotalFailedAttempts'] ?? 0);
+        
+        return [
+            'newTotalFailed' => $totalFailed + 1,
+            'newCurrentFailed' => $isAlreadyLocked ? $currentFailed : $currentFailed + 1,
+            'currentFailed' => $currentFailed
+        ];
+    }
+
+    /**
+     * Process failed login within transaction
+     * @todo : If queryBuilder a performance issue, consider using native SQL
+     */
+    private function processFailedLoginInTransaction(
+        array $customerData, 
+        array $lockState, 
+        array $newCounts, 
+        array $config, 
+        string $email
+    ): array {
+        $customerId = (int)$customerData['id'];
+
+        /**
+         * Use Doctrine's transaction management
+         * @see: https://www.doctrine-project.org/projects/doctrine-orm/en/3.5/reference/transactions-and-concurrency.html
+         */
+        $this->em->beginTransaction();
+        try {
+            $this->updateCustomerCounters($customerId, 0, $newCounts['newCurrentFailed'], $newCounts['newTotalFailed']);
+
+            if ($lockState['isAlreadyLocked']) {
+                /** No new lock needed: just prevent SW to extend the lockeduntil and update total counts */
+                return $this->handleAlreadyLockedCustomer($customerData, $lockState, $newCounts, $config, $email);
+            }
+
+            if ($newCounts['newCurrentFailed'] >= $config['maxAttempts']) {
+                /** New lock required: lock customer and send notification */
+                return $this->handleNewLockRequired($customerData, $newCounts, $config);
+            }
+            /** no lock: count attempts only*/
+            return $this->handleFailedAttemptTracking($customerData, $newCounts, $config);
+            
+        } catch (Exception $e) {
+            $this->em->rollback();
+            throw $e;
+        }
+    }
+
+    /**
+     * Handle customer that is already locked
+     * Core lockeduntil field is updated to match our custom ecLockedUntil field
+     * since shopware updates the lockedUntil field automatically at every login attempt.
+     * No mail is sent in this case, as the customer is already locked.
+     * This method logs the event and notifies the event manager.
+     */
+    private function handleAlreadyLockedCustomer(
+        array $customerData, 
+        array $lockState, 
+        array $newCounts, 
+        array $config, 
+        string $email
+    ): array {
+        $customerId = (int)$customerData['id'];
+        $this->synchronizeNativeLockField($customerId, $lockState['lockedUntil']);
+        $this->em->commit();
+
+        $this->logSecurityEventById('login_failed_while_locked', $customerId, $customerData['email'], [
+            'total_failed_attempts' => $newCounts['newTotalFailed'],
+            'current_failed_attempts' => $newCounts['currentFailed'],
+            'lock_until' => $lockState['lockedUntil']->format('Y-m-d H:i:s')
+        ]);
+
+        $this->eventManager->notify('EcLoginExt.handleFailedLoginAlreadyLockedNotify', [
+            'customerId' => $customerId,
+            'email' => $email,
+            'lockedUntil' => $lockState['lockedUntil'],
+            'total_failed_attempts' => $newCounts['newTotalFailed'],
+            'current_failed_attempts' => $newCounts['currentFailed'],
+        ]);
+
+        return $this->createLockedResponse(
+            $lockState['lockedUntil'], 
+            $newCounts['currentFailed'], 
+            $config['maxAttempts'], 
+            $newCounts['newTotalFailed'], 
+            'already_locked', 
+            false
+        );
+    }
+
+    /**
+     * Handle new lock requirement
+     * This method locks the customer account, generates an unlock token if enabled,
+     * and sends a notification email if configured.
+     * It logs the event and notifies the event manager.
+     */
+    private function handleNewLockRequired(
+        array $customerData, 
+        array $newCounts, 
+        array $config,
+    ): array {
+        $customerId = (int)$customerData['id'];
+        $lockUntil = (clone $config['now'])->add(new DateInterval('PT' . $config['lockDurationHours'] . 'H'));
+        
+        $this->lockCustomerWithToken($customerId, $lockUntil, $config['enableEmailUnlock'], $this->getConfig());
+        $this->em->commit();
+
+        if ($config['enableEmailUnlock']) {
+            $customer = $this->em->find(Customer::class, $customerId);
+            if ($customer && $customer->getAttribute() && $customer->getAttribute()->getEcUnlockToken()) {
+
+                /** send notification mail */
+                $this->sendLockoutNotification($customer, $config['lockDurationHours']);
+            }
+        }
+
+        $this->logSecurityEventById('account_locked', $customerId, $customerData['email'], [
+            'total_failed_attempts' => $newCounts['newTotalFailed'],
+            'current_failed_attempts' => $newCounts['newCurrentFailed'],
+            'lock_until' => $lockUntil->format('Y-m-d H:i:s'),
+            'max_attempts_configured' => $config['maxAttempts']
+        ]);
+
+        $this->eventManager->notify('EcLoginExt.handleFailedLoginNewlyLockedNotify', [
+            'customer' => $customerData,
+            'total_failed_attempts' => $newCounts['newTotalFailed'],
+            'current_failed_attempts' => $newCounts['newCurrentFailed'],
+            'lock_until' => $lockUntil->format('Y-m-d H:i:s'),
+            'max_attempts_configured' => $config['maxAttempts']
+        ]);
+
+        return $this->createLockedResponse(
+            $lockUntil, 
+            $newCounts['newCurrentFailed'], 
+            $config['maxAttempts'], 
+            $newCounts['newTotalFailed'], 
+            'max_attempts_reached', 
+            $config['enableEmailUnlock']
+        );
+    }
+
+    /**
+     * Handle failed attempt tracking (no lock required)
+     */
+    private function handleFailedAttemptTracking(
+        array $customerData, 
+        array $newCounts, 
+        array $config
+    ): array {
+        $customerId = (int)$customerData['id'];
+        $this->em->commit();
+
+        $this->logSecurityEventById('login_failed', $customerId, $customerData['email'], [
+            'total_failed_attempts' => $newCounts['newTotalFailed'],
+            'current_failed_attempts' => $newCounts['newCurrentFailed'],
+            'attempts_remaining' => $config['maxAttempts'] - $newCounts['newCurrentFailed']
+        ]);
+
+        $this->eventManager->notify('EcLoginExt.handleFailedLoginLoginFailed', [
+            'customer' => $customerData,
+            'total_failed_attempts' => $newCounts['newTotalFailed'],
+            'current_failed_attempts' => $newCounts['newCurrentFailed'],
+            'max_attempts_configured' => $config['maxAttempts']
+        ]);
+
+        return [
+            'locked' => false,
+            'attempts_remaining' => $config['maxAttempts'] - $newCounts['newCurrentFailed'],
+            'attempts' => $newCounts['newCurrentFailed'],
+            'max_attempts' => $config['maxAttempts'],
+            'total_failed_attempts' => $newCounts['newTotalFailed']
+        ];
+    }
+
+    /**
+     * Check if customer needs to be unlocked
+     */
+    private function customerNeedsUnlock(int $customerId): bool
+    {
+        $lockData = $this->em->createQueryBuilder()
+            ->select('ca.ecCurrentFailedAttempts', 'ca.ecLockedUntil')
+            ->from(Customer::class, 'c')
+            ->leftJoin('c.attribute', 'ca')
+            ->where('c.id = :customerId')
+            ->setParameter('customerId', $customerId)
+            ->getQuery()
+            ->getArrayResult();
+
+        $lockInfo = !empty($lockData) ? $lockData[0] : null;
+        return $lockInfo && ($lockInfo['ecCurrentFailedAttempts'] > 0 || !empty($lockInfo['ecLockedUntil']));
+    }
+
+    /**
+     * Unlock customer after successful login
+     */
+    private function unlockCustomerAfterSuccess(Customer $customer, $attribute): void
+    {
+        $this->em->beginTransaction();
+        try {
+            $this->clearShopwareLockFields($customer->getId());
+            $this->clearCustomerAttributes($customer, $attribute);
+            
+            $this->em->flush();
+            $this->em->commit();
+        } catch (Exception $e) {
+            $this->em->rollback();
+            throw $e;
+        }
+    }
+
+    /**
+     * Clear Shopware's native lock fields
+     */
+    private function clearShopwareLockFields(int $customerId): void
+    {
+        $this->em->createQueryBuilder()
+            ->update(Customer::class, 'c')
+            ->set('c.failedLogins', ':failedLogins')
+            ->set('c.lockedUntil', ':lockedUntil')
+            ->where('c.id = :customerId')
+            ->setParameter('failedLogins', 0)
+            ->setParameter('lockedUntil', null)
+            ->setParameter('customerId', $customerId)
+            ->getQuery()
+            ->execute();
+    }
+
+    /**
+     * Clear custom attributes after successful login
+     */
+    private function clearCustomerAttributes(Customer $customer, $attribute): void
+    {
+        $customer->setFailedLogins(0);
+        if ($attribute) {
+            $attribute->setEcCurrentFailedAttempts(0);
+            $attribute->setEcLockedUntil(null);
+            $attribute->setEcUnlockToken(null);
+            $attribute->setEcUnlockTokenExpires(null);
+            $this->em->persist($attribute);
         }
     }
 
@@ -663,7 +716,7 @@ class LoginSecurityService
     private function createLockedResponse(DateTime $lockUntil, int $attempts, int $maxAttempts, int $totalFailed, string $reason, bool $unlockEmailSent): array
     {
         return [
-            'locked' => true, 
+            'locked' => true,
             'reason' => $reason,
             'lock_until' => $lockUntil,
             'unlock_email_sent' => $unlockEmailSent,

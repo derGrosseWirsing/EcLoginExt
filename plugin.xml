@@ -4,12 +4,13 @@
     <label lang="de">EcLoginExt</label>
     <label lang="en">EcLoginExt</label>
     <version>1.0.0</version>
-    <copyright>(c) by MS</copyright>
+    <copyright>(c) by Marcus Salden</copyright>
     <license>proprietary</license>
     <link>https://marcus-salden.de</link>
     <author>Marcus Salden</author>
     <compatibility minVersion="5.2.0" />
-
+    <description lang="de">Erweiterte Login-Sicherheit für Shopware 5</description>
+    <description lang="en">Enhanced login security for Shopware 5</description>
     <changelog version="1.0.0">
         <changes lang="de">Erste Veröffentlichung</changes>
         <changes lang="en">Initial Release</changes>

@@ -4,14 +4,10 @@
            xsi:schemaLocation="http://symfony.com/schema/dic/services http://symfony.com/schema/dic/services/services-1.0.xsd">
 
     <services>
-        <service id="ec_login_ext.subscriber.auth"
-                 class="EcLoginExt\Subscriber\AuthSubscriber"
+        <service id="ec_login_ext.controller.unlock"
+                 class="EcLoginExt\Controllers\Frontend\EcUnlock"
                  public="true">
-            <argument type="service" id="service_container"/>
             <argument type="service" id="ec_login_ext.service.login_security"/>
-            <argument type="service" id="template"/>
-            <argument>%ec_login_ext.plugin_dir%</argument>
-            <tag name="shopware.event_subscriber"/>
         </service>
     </services>
 </container>

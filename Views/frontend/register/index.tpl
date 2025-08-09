@@ -8,6 +8,7 @@
     {if $sSuccessMessages}
         {include file="frontend/_includes/messages.tpl" type="success" list=$sSuccessMessages}
     {/if}
+
 {/block}
 
 {block name="frontend_index_javascript_async_ready"}

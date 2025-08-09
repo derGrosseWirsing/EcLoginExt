@@ -1,0 +1,17 @@
+<div style="font-family:arial; font-size:12px;">
+{include file="string:{config name=emailheaderhtml}"}
+<p>Hallo {$customerName},</p>
+
+<p>Ihr Account wurde wegen zu vieler Anmeldeversuch vorübergehend gesperrt.</p>
+
+<p>Ihr Konto wird in <strong>{$lockDuration} Stunden</strong> wieder entsperrt.</p>
+
+<p>Sie können Ihr Konto auch sofort mit diesem Link entsperren:<br>
+<a href="{$unlockUrl}" style="color: #007bff;">Konto jetzt entsperren</a></p>
+
+<p>Fall Sie sich nicht versucht haben, in Ihr Konto einzuloggen, kontaktieren Sie bitte unseren Support.</p>
+
+<p>Mit besten Grüßen,</p>
+
+{include file="string:{config name=emailfooterhtml}"}
+</div>

@@ -1,0 +1,15 @@
+<?xml version="1.0" ?>
+<container xmlns="http://symfony.com/schema/dic/services"
+           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+           xsi:schemaLocation="http://symfony.com/schema/dic/services http://symfony.com/schema/dic/services/services-1.0.xsd">
+
+    <services>
+        <service id="ec_login_ext.customer_unlock_service_decorator"
+                 class="EcLoginExt\Bundle\AccountBundle\Service\CustomerUnlockServiceDecorator"
+                 decorates="shopware_account.customer_unlock_service"
+        >
+            <argument type="service" id="ec_login_ext.customer_unlock_service_decorator.inner"/>
+            <argument type="service" id="Doctrine\DBAL\Connection"/>
+        </service>
+    </services>
+</container>

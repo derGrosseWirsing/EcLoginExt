@@ -4,22 +4,41 @@ declare(strict_types=1);
 
 namespace EcLoginExt\Subscriber;
 
+use DateTime;
 use Enlight\Event\SubscriberInterface;
 use EcLoginExt\Services\LoginSecurityService;
+use Enlight_Event_EventArgs;
 use Enlight_Template_Manager;
+use Shopware\Components\DependencyInjection\Container;
+use Shopware\Components\Model\ModelManager;
 use Shopware\Models\Customer\Customer;
+use Shopware_Components_Snippet_Manager;
 
 /**
  * Authentication Subscriber
  *
- * Handles login-related events including failed/successful logins
- * and account controller actions
+ * Event flow:
+ *
+ * 1. onPreDispatch - Fires first when any frontend controller loads
+ * 2. onLoginFailed / onLoginSuccessful - Fires during authentication process
+ * 3. onLoginFilterResult - Fires immediately after login events to filter/modify results
+ * 4. onLoginAction - Fires during PostDispatch of Account/Register controllers
+ *
  */
 class AuthSubscriber implements SubscriberInterface
 {
+    private Shopware_Components_Snippet_Manager $snippetsManager;
+    private ModelManager $modelManager;
 
-    public function __construct(private LoginSecurityService $loginSecurityService, private Enlight_Template_Manager $templateManager, private string $pluginDirectory)
+    /** @Todo: Cleanup mixture of Service Injection */
+    public function __construct(
+        private Container                $container,
+        private LoginSecurityService     $loginSecurityService,
+        private Enlight_Template_Manager $templateManager,
+        private string                   $pluginDirectory)
     {
+        $this->snippetsManager = $this->container->get('snippets');
+        $this->modelManager = $this->container->get('models');
     }
 
     public static function getSubscribedEvents(): array
@@ -28,8 +47,8 @@ class AuthSubscriber implements SubscriberInterface
             'Enlight_Controller_Action_PreDispatch_Frontend' => 'onPreDispatch',
             'Shopware_Modules_Admin_Login_Failure' => 'onLoginFailed',
             'Shopware_Modules_Admin_Login_Successful' => 'onLoginSuccessful',
-            'Enlight_Controller_Action_PostDispatch_Frontend_Register' => 'onAccountAction',
-            'Enlight_Controller_Action_PostDispatch_Frontend_Account' => 'onAccountAction',
+            'Enlight_Controller_Action_PostDispatch_Frontend_Register' => 'onLoginAction',
+            'Enlight_Controller_Action_PostDispatch_Frontend_Account' => 'onLoginAction',
             'Shopware_Modules_Admin_Login_FilterResult' => 'onLoginFilterResult',
         ];
     }
@@ -41,36 +60,41 @@ class AuthSubscriber implements SubscriberInterface
 
     /**
      * Handle failed authentication
+     * Result stored in session
      */
-    public function onLoginFailed(\Enlight_Event_EventArgs $args): void
+    public function onLoginFailed(Enlight_Event_EventArgs $args): void
     {
         $email = $args->get('email');
 
         if (!empty($email)) {
             $result = $this->loginSecurityService->handleFailedLogin($email);
 
-            $session = Shopware()->Session();
+            $session = $this->container->get('session');
             $session->offsetSet('EcSecureLoginResult', $result);
         }
     }
 
-    public function onLoginFilterResult(\Enlight_Event_EventArgs $args): void
+    /**
+     * Takes session Data from onLoginFailed and the loginSecurityService
+     * and Calculates the remaining Time to return
+     * Messages (for the frontend counter)
+     */
+    public function onLoginFilterResult(Enlight_Event_EventArgs $args): void
     {
 
-        $session = Shopware()->Session();
+        $session = $this->container->get('session');
 
         if (!$session->get('EcSecureLoginResult')) {
             return;
         }
 
         $return = $args->getReturn();
-        $snippetsManager = Shopware()->Snippets();
-        $snippets = $snippetsManager->getNamespace('frontend/ec_login_ext');
 
+        $snippets = $this->snippetsManager->getNamespace('frontend/ec_login_ext');
 
         $result = $session->get('EcSecureLoginResult');
 
-        // Not locked yet, show remaining attempts
+        /** Not locked yet, show remaining attempts */
         if (!$result['locked'] && $result['attempts_remaining']) {
             $remainingAttempts = sprintf($snippets->get('account/login/remaining'), $result['attempts_remaining'], $result['max_attempts']);
             $return[0][] = $remainingAttempts;
@@ -79,12 +103,13 @@ class AuthSubscriber implements SubscriberInterface
             return;
         }
 
+        /** Locked: calculate time difference for the frontend counter */
         if ($result['locked'] && $result['lock_until']) {
 
             $then = $result['lock_until'];
-            $now = new \DateTime();
+            $now = new DateTime();
 
-            $remaining = $now->diff(new \DateTime($then->format('Y-m-d H:i:s')));
+            $remaining = $now->diff(new DateTime($then->format('Y-m-d H:i:s')));
 
             $lockMessage = sprintf($snippets->get('account/login/locked/until'), $then->format('j.n.Y'), $then->format('H:i'));
             $return[0][] = $lockMessage;
@@ -93,14 +118,14 @@ class AuthSubscriber implements SubscriberInterface
             );
             $args->setReturn($return);
             $session->set('EcSecureLoginResult', null);
-            return;
         }
     }
 
     /**
      * Handle successful authentication
+     * Resets failed Attempts if necessary
      */
-    public function onLoginSuccessful(\Enlight_Event_EventArgs $args): void
+    public function onLoginSuccessful(Enlight_Event_EventArgs $args): void
     {
         $email = $args->get('email');
 
@@ -117,26 +142,28 @@ class AuthSubscriber implements SubscriberInterface
      */
     private function getCustomerByEmail(string $email): ?Customer
     {
-        $em = Shopware()->Models();
+        $em = $this->modelManager;
         return $em->getRepository('Shopware\Models\Customer\Customer')
             ->findOneBy(['email' => $email]);
     }
 
     /**
-     * Handle account controller actions to inject security information
+     * Passes Messages from the Unlock Controller to the Frontend View
+     * since Counter-Data and lockmessage is being transferred according the
+     * shopware way at onLoginFilterResult
      */
-    public function onAccountAction(\Enlight_Event_EventArgs $args): void
+    public function onLoginAction(Enlight_Event_EventArgs $args): void
     {
         $controller = $args->getSubject();
         $view = $controller->View();
-        $session = Shopware()->Session();
+        $session = $this->container->get('session');
 
-        // Handle error messages from unlock controller
+        /** Handle error messages from unlock controller */
         if ($session->has('sErrorFlag') && $session->has('sErrorMessages')) {
             $view->assign('sErrorFlag', $session->get('sErrorFlag'));
             $view->assign('sErrorMessages', $session->get('sErrorMessages'));
 
-            // Clear from session after use
+            /** Clear from session after use */
             $session->remove('sErrorFlag');
             $session->remove('sErrorMessages');
         }
@@ -145,45 +172,18 @@ class AuthSubscriber implements SubscriberInterface
             $view->assign('sSuccessFlag', $session->get('sSuccessFlag'));
             $view->assign('sSuccessMessages', $session->get('sSuccessMessages'));
 
-            // Clear from session after use
+            /** Clear from session after use */
             $session->remove('sSuccessFlag');
             $session->remove('sSuccessMessages');
         }
 
-        // Pass login result to template if available
+        /** Pass login result to template if available */
         if ($session->has('EcSecureLoginResult')) {
             $result = $session->get('EcSecureLoginResult');
             $view->assign('EcSecureLoginResult', $result);
 
-            // Clear from session after use
+            /** Clear from session after use */
             $session->remove('EcSecureLoginResult');
-        }
-
-        // Handle unlock controller success/error messages
-        if ($controller->Request()->getActionName() === 'login') {
-            // Handle success messages from unlock controller
-            if ($session->offsetExists('sSuccessFlag') && $session->offsetExists('sSuccessMessages')) {
-                $view->assign('sSuccessFlag', $session->get('sSuccessFlag'));
-                $view->assign('sSuccessMessages', $session->get('sSuccessMessages'));
-                
-                // Clear from session after use
-                $session->remove('sSuccessFlag');
-                $session->remove('sSuccessMessages');
-            }
-
-            // Check if current user is locked
-            $userData = $session->get('sUserData');
-            if ($userData && isset($userData['additional']['user'])) {
-                $customer = Shopware()->Models()->find(
-                    'Shopware\Models\Customer\Customer',
-                    $userData['additional']['user']['id']
-                );
-
-                if ($customer && $this->loginSecurityService->isCustomerLocked($customer)) {
-                    $view->assign('EcAccountLocked', true);
-                    $view->assign('EcLockUntil', $customer->getLockedUntil());
-                }
-            }
         }
     }
 }
