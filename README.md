@@ -38,25 +38,35 @@ Alternativ können Sie das Plugin über das Shopware Backend installieren:
 
 ## 1.2 Composer-Installation
 Falls Sie Composer verwenden, fügen Sie das Plugin zu Ihrer `composer.json` hinzu:
-composer require dergrossewirsing/ec-login-ext:dev-main
+1. composer require dergrossewirsing/ec-login-ext:dev-main
+2. composer update dergrossewirsing/ec-login-ext
+```bash
+# Plugin über die Konsole installieren
+php bin/console sw:plugin:refresh
+php bin/console sw:plugin:install EcLoginExt
+php bin/console sw:plugin:activate EcLoginExt
 
+# Cache leeren und theme kompilieren
+php bin/console sw:cache:clear
+php bin/console sw:theme:compile
+```
 
 ### 2. Datenbank-Migration
 Das Plugin erstellt automatisch bei der Installation:
-- Tabelle `ec_customer_security` für Sicherheitsdaten
 - E-Mail-Template `sECSECURELOGINLOCKOUT` für Benachrichtigungen
+- Alle erforderlichen Freitextfelder in der `s_user_attributes` Tabelle
 
 ### 3. Template-Integration
 Das Plugin erweitert automatisch das Standard-Login-Template um:
 - Fehlermeldungen mit verbleibenden Versuchen
 - JavaScript-Countdown bei aktiver Sperre
-- Entsperr-Formular �ber `/EcUnlock`
+- Entsperr-Meldungen aus `/EcUnlock`
 
 ## Konfiguration
 
 ### Plugin-Einstellungen (Backend)
 ```
-Grundkonfiguration � Plugins � EcLoginExt
+Grundkonfiguration / Plugins / EcLoginExt
 
 - Maximale Fehlversuche: 3 (Standard)
 - Sperrdauer: 24 Stunden (Standard)  
@@ -65,101 +75,84 @@ Grundkonfiguration � Plugins � EcLoginExt
 ```
 
 ### E-Mail-Templates anpassen
-Die E-Mail-Vorlagen befinden sich in:
+Die E-Mail-Vorlagen werden bei einer Erstinstallation automatisch importiert. 
+Sie können diese unter **Einstellungen** > **E-Mail-Vorlagen** anpassen:
 ```
 Views/mail/lockout-notification.html  # HTML-Version
 Views/mail/lockout-notification.txt   # Text-Version
 ```
 
 ### Textbausteine (Snippets) anpassen
+Die Textbausteine für Fehlermeldungen und Benachrichtigungen sind im Plugin enthalten
+und werden bei der Installation automatisch importiert. 
+Sie können diese unter **Einstellungen** > **Textbausteine** anpassen:
 ```bash
 # Snippet-Import in Datenbank
 php bin/console sw:snippets:to:db
 
-# Verf�gbare Namespaces:
-# - frontend/ec_login_ext/account/login/remaining
-# - frontend/ec_login_ext/account/login/locked/until
+# Verfügbare Namespaces:
+# - account/login/locked/until 
+# - account/login/locked/counter 
+# - account/login/remaining
+# - account/unlocked/invalid_token
+# - account/unlocked/success
+# - account/unlocked/not_found
+# - account/unlocked/expired
+# - account/unlocked/error
 ```
 
 ## Verwendung
 
-### F�r Endkunden
+### Für Endkunden
 1. **Normaler Login**: Bei korrekten Zugangsdaten erfolgt die Anmeldung wie gewohnt
 2. **Fehlversuche**: Nach jedem falschen Login wird die Anzahl verbleibender Versuche angezeigt
-3. **Kontosperrung**: Nach 3 Fehlversuchen erscheint eine Sperrung-Meldung mit Countdown
-4. **E-Mail-Benachrichtigung**: Automatische E-Mail mit Entsperr-Link wird versendet
+3. **Kontosperrung**: Nach 3 (konfigurierbar) Fehlversuchen erscheint eine Sperrung-Meldung mit Countdown
+4. **E-Mail-Benachrichtigung**: Automatische E-Mail mit Entsperr-Link wird versendet (konfigurierbar)
 5. **Vorzeitige Entsperrung**: Klick auf den Link in der E-Mail entsperrt das Konto sofort
-6. **Automatische Entsperrung**: Nach 24 Stunden ist das Konto wieder verf�gbar
+6. **Automatische Entsperrung**: Nach 24(konfigurierbar) Stunden ist das Konto wieder verfügbar
 
-### F�r Shop-Betreiber
-**Monitoring �ber s_mail_log Tabelle:**
+### Für Shop-Betreiber
+**Monitoring über s_mail_log Tabelle:**
 ```sql
 SELECT * FROM s_mail_log WHERE type = 'sECSECURELOGINLOCKOUT' ORDER BY sent_at DESC;
 ```
+**Manuelle Entsperrung eines Kunden:**
+Im Backend unter **Kunden** > **Kunden verwalten**:
+1. Suchen Sie den betroffenen Kunden
+2. Klicken Sie auf **Bearbeiten**
+3. Klicken Sie auf "Entsperren"
 
-**Manuelle Entsperrung �ber Datenbank:**
+**Manuelle Entsperrung über Datenbank:**
 ```sql
-UPDATE ec_customer_security 
-SET consecutive_failed_attempts = 0, locked_until = NULL 
-WHERE customer_id = [CUSTOMER_ID];
-```
+UPDATE s_user_attributes 
+SET ec_current_failed_attempts = 0, ec_locked_until = NULL 
+WHERE userID = [CUSTOMER_ID];
 
-**Sicherheitsstatistiken abrufen:**
-```sql
-SELECT 
-    c.email,
-    ecs.consecutive_failed_attempts,
-    ecs.total_failed_attempts,
-    ecs.locked_until,
-    ecs.last_failed_attempt
-FROM ec_customer_security ecs
-JOIN s_user c ON ecs.customer_id = c.id
-WHERE ecs.total_failed_attempts > 0
-ORDER BY ecs.last_failed_attempt DESC;
+UPDATE s_user
+SET lockeduntil = NULL
+WHERE id = [CUSTOMER_ID];
 ```
 
 ## Technische Details
 
 ### Architektur
-- **LoginSecurityService**: Zentrale Gesch�ftslogik f�r Sperrmechanismen
-- **AuthSubscriber**: Event-Handler f�r Shopware Login-Events
-- **EcCustomerSecurity Entity**: Doctrine-basierte Datenpersistierung
-- **EcUnlock Controller**: Frontend-Controller f�r Token-Entsperrung
+- **LoginSecurityService**: Zentrale Geschäftslogik für Sperrmechanismen
+- **AuthSubscriber**: Event-Handler für Shopware Login-Events
+- **EcUnlock Controller**: Frontend-Controller für Token-Entsperrung
 - **MailTemplateInstaller**: Automatische E-Mail-Template-Installation
 
 ### Events
 Das Plugin reagiert auf folgende Shopware Events:
-- `Shopware_Modules_Admin_Login_Failure` � Fehlversuch-Behandlung
-- `Shopware_Modules_Admin_Login_Successful` � Reset bei erfolgreichem Login
-- `Shopware_Modules_Admin_Login_FilterResult` � Fehlermeldung-Modifikation
+- `Shopware_Modules_Admin_Login_Failure` => Fehlversuch-Behandlung
+- `Shopware_Modules_Admin_Login_Successful` => Reset bei erfolgreichem Login
+- `Shopware_Modules_Admin_Login_FilterResult` => Fehlermeldung-Modifikation
 
 ### Sicherheitsmerkmale
 - **Sichere Token-Generierung**: Verwendung von `random_bytes()` und `bin2hex()`
-- **Zeitbasierte Token**: Unlock-Token haben eine G�ltigkeitsdauer von 24 Stunden
+- **Zeitbasierte Token**: Unlock-Token haben eine Gültigkeitsdauer von 24 Stunden
 - **SQL-Injection-Schutz**: Verwendung von Doctrine ORM/DBAL
-- **XSS-Schutz**: Proper Output-Escaping in Templates
-- **Rate-Limiting**: Schutz vor Brute-Force-Angriffen
-
-## Debugging
-
-### Log-Dateien
-```bash
-# Shopware Logs
-tail -f var/log/core_dev.log | grep "EcLoginExt"
-
-# E-Mail Logs (in Datenbank)
-SELECT * FROM s_mail_log WHERE type LIKE '%ECSECURE%';
-```
-
-### Debug-Modus aktivieren
-```php
-// In plugin.xml oder Backend-Konfiguration
-<config-element type="boolean">
-    <name>debugMode</name>
-    <label>Debug-Modus aktivieren</label>
-    <value>false</value>
-</config-element>
-```
+- **E-Mail-Sicherheit**: E-Mail-Versand erfolgt über Shopware's integriertes Mail-System
+- **Session-Schutz**: Nutzung von Shopware's Session-Management für sichere Datenübertragung
 
 ## Deinstallation
 
@@ -169,26 +162,17 @@ php bin/console sw:plugin:deactivate EcLoginExt
 php bin/console sw:plugin:uninstall EcLoginExt
 
 # Datenbank-Bereinigung (optional)
-DROP TABLE IF EXISTS ec_customer_security;
 DELETE FROM s_mail_log WHERE type = 'sECSECURELOGINLOCKOUT';
 DELETE FROM s_core_config_mails WHERE name = 'sECSECURELOGINLOCKOUT';
 ```
 
-## Support
+## Kompatibilität
 
-Bei Problemen oder Fragen:
-1. �berpr�fen Sie die Shopware-Logs auf Fehlermeldungen
-2. Kontrollieren Sie die Datenbank-Verbindung und -Berechtigungen
-3. Stellen Sie sicher, dass alle required PHP-Extensions verf�gbar sind
-4. Testen Sie die E-Mail-Konfiguration des Shops
-
-## Kompatibilit�t
-
-- **Shopware Version**: 5.6.0 oder h�her
-- **PHP Version**: 7.4 oder h�her
+- **Shopware Version**: 5.6.0 oder höher (entwickelt und getestet mit 5.7.14)
+- **PHP Version**: 8.0 oder höher (entwickelt auf PHP 8.0.21)
 - **Datenbank**: MySQL 5.7+ / MariaDB 10.3+
-- **Browser**: Moderne Browser mit JavaScript-Unterst�tzung
+- **Browser**: Moderne Browser mit JavaScript-Unterstützung
 
 ## Lizenz
-
-Dieses Plugin wurde f�r Shopware 5 entwickelt und folgt den Shopware Plugin-Entwicklungsrichtlinien.
+Dieses Plugin wurde für Shopware 5 entwickelt und folgt den 
+Shopware Plugin-Entwicklungsrichtlinien.
