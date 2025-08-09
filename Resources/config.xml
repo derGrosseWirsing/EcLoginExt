@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="../../../../engine/Shopware/Components/Plugin/schema/config.xsd">
+    
+    <elements>
+        <element type="number" required="true" scope="shop">
+            <name>maxAttempts</name>
+            <label lang="de">Maximale Fehlversuche</label>
+            <label lang="en">Maximum Failed Attempts</label>
+            <value>3</value>
+            <description lang="de">Anzahl erlaubter Fehlversuche bevor das Konto gesperrt wird</description>
+            <description lang="en">Number of allowed failed attempts before account gets locked</description>
+        </element>
+        
+        <element type="number" required="true" scope="shop">
+            <name>lockDurationHours</name>
+            <label lang="de">Sperrdauer (Stunden)</label>
+            <label lang="en">Lock Duration (Hours)</label>
+            <value>24</value>
+            <description lang="de">Dauer der Kontosperrung in Stunden</description>
+            <description lang="en">Duration of account lock in hours</description>
+        </element>
+        
+        <element type="boolean" required="false" scope="shop">
+            <name>enableEmailUnlock</name>
+            <label lang="de">E-Mail Entsperrung aktivieren</label>
+            <label lang="en">Enable Email Unlock</label>
+            <value>true</value>
+            <description lang="de">Ermöglicht Benutzern die Entsperrung via E-Mail Link</description>
+            <description lang="en">Allows users to unlock their account via email link</description>
+        </element>
+        
+        <element type="number" required="false" scope="shop">
+            <name>unlockTokenExpiryHours</name>
+            <label lang="de">Token-Gültigkeitsdauer (Stunden)</label>
+            <label lang="en">Token Validity Duration (Hours)</label>
+            <value>24</value>
+            <description lang="de">Gültigkeitsdauer des Entsperr-Tokens in Stunden</description>
+            <description lang="en">Validity duration of unlock token in hours</description>
+        </element>
+        
+        <element type="boolean" required="false" scope="shop">
+            <name>logSecurityEvents</name>
+            <label lang="de">Ereignisse protokollieren</label>
+            <label lang="en">Log Security Events</label>
+            <value>true</value>
+            <description lang="de">Protokolliert alle Sicherheitsereignisse für Audit-Zwecke</description>
+            <description lang="en">Log all security events for audit purposes</description>
+        </element>
+    </elements>
+</config>
