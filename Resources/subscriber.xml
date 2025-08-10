@@ -7,9 +7,12 @@
         <service id="ec_login_ext.subscriber.auth"
                  class="EcLoginExt\Subscriber\AuthSubscriber"
                  public="true">
-            <argument type="service" id="service_container"/>
+
+            <argument type="service" id="snippets"/>
+            <argument type="service" id="models"/>
             <argument type="service" id="ec_login_ext.service.login_security"/>
             <argument type="service" id="template"/>
+            <argument type="service" id="session"/>
             <argument>%ec_login_ext.plugin_dir%</argument>
             <tag name="shopware.event_subscriber"/>
         </service>

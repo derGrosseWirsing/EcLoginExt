@@ -7,9 +7,9 @@ namespace EcLoginExt\Subscriber;
 use DateTime;
 use Enlight\Event\SubscriberInterface;
 use EcLoginExt\Services\LoginSecurityService;
+use Enlight_Components_Session_Namespace;
 use Enlight_Event_EventArgs;
 use Enlight_Template_Manager;
-use Shopware\Components\DependencyInjection\Container;
 use Shopware\Components\Model\ModelManager;
 use Shopware\Models\Customer\Customer;
 use Shopware_Components_Snippet_Manager;
@@ -27,18 +27,14 @@ use Shopware_Components_Snippet_Manager;
  */
 class AuthSubscriber implements SubscriberInterface
 {
-    private Shopware_Components_Snippet_Manager $snippetsManager;
-    private ModelManager $modelManager;
-
-    /** @Todo: Cleanup mixture of Service Injection */
     public function __construct(
-        private Container                $container,
-        private LoginSecurityService     $loginSecurityService,
-        private Enlight_Template_Manager $templateManager,
-        private string                   $pluginDirectory)
+        private Shopware_Components_Snippet_Manager  $snippetsManager,
+        private ModelManager                         $modelManager,
+        private LoginSecurityService                 $loginSecurityService,
+        private Enlight_Template_Manager             $templateManager,
+        private Enlight_Components_Session_Namespace $session,
+        private string                               $pluginDirectory)
     {
-        $this->snippetsManager = $this->container->get('snippets');
-        $this->modelManager = $this->container->get('models');
     }
 
     public static function getSubscribedEvents(): array
@@ -69,8 +65,8 @@ class AuthSubscriber implements SubscriberInterface
         if (!empty($email)) {
             $result = $this->loginSecurityService->handleFailedLogin($email);
 
-            $session = $this->container->get('session');
-            $session->offsetSet('EcSecureLoginResult', $result);
+            $session = $this->session;
+            $session->set('EcSecureLoginResult', $result);
         }
     }
 
@@ -82,7 +78,7 @@ class AuthSubscriber implements SubscriberInterface
     public function onLoginFilterResult(Enlight_Event_EventArgs $args): void
     {
 
-        $session = $this->container->get('session');
+        $session = $this->session;
 
         if (!$session->get('EcSecureLoginResult')) {
             return;
@@ -117,10 +113,10 @@ class AuthSubscriber implements SubscriberInterface
             $lockMessage = sprintf($lockText, $then->format('j.n.Y'), $then->format('H:i'));
             $return[0][] = $lockMessage;
 
-            $counter  = $snippets->get('account/login/locked/counter') ?? '';
+            $counter = $snippets->get('account/login/locked/counter') ?? '';
             $return[0][] = sprintf($counter,
-                    $remaining->h, $remaining->i, $remaining->s
-                );
+                $remaining->h, $remaining->i, $remaining->s
+            );
 
             $args->setReturn($return);
             $session->set('EcSecureLoginResult', null);
@@ -162,7 +158,7 @@ class AuthSubscriber implements SubscriberInterface
     {
         $controller = $args->getSubject();
         $view = $controller->View();
-        $session = $this->container->get('session');
+        $session = $this->session;
 
         /** Handle error messages from unlock controller */
         if ($session->has('sErrorFlag') && $session->has('sErrorMessages')) {
