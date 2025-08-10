@@ -37,6 +37,10 @@ Alternativ können Sie das Plugin über das Shopware Backend installieren:
 5. Leeren Sie den Cache und kompilieren Sie das Theme
 
 ## 1.2 Composer-Installation
+```bash
+composer config extra.installer-paths.custom/plugins/{\$name}/ '["type:shopware-plugin"]' 
+```
+
 Falls Sie Composer verwenden, fügen Sie das Plugin zu Ihrer `composer.json` hinzu:
 ```bash
 composer config repositories.ec-login-ext vcs https://github.com/derGrosseWirsing/EcLoginExt
