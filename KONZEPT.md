@@ -88,7 +88,7 @@ Shopware Events und erweitert das System um moderne Sicherheitsfeatures ohne Cor
 ## Warum alternative Lösungsansätze problematisch wären: ##
 
 ### AccountController LoginAction-Hook (before/replace): ### 
-Ein Hook der `loginAction()` Methode wäre weniger invasiv als ein kompletter Controller-Hook, würde aber dennoch erhebliche Probleme verursachen. Man müsste die gesamte Login-Logik der Action duplizieren (Request-Verarbeitung, Validierung, Template-Zuweisung, Weiterleitung), was zu Code-Duplikation und Wartbarkeitsproblemen führt. Bei Shopware-Updates könnten sich die internen Abläufe der `loginAction()` ändern, wodurch der Hook inkompatibel wird. Zudem würde man die bewährte Shopware-Logik für Session-Management, CSRF-Schutz und Template-Integration verlieren oder manuell nachbauen müssen.
+Ein Hook der `loginAction()` Methode wäre nicht sehr invasiv, würde aber dennoch erhebliche Probleme verursachen. Man müsste die gesamte Login-Logik der Action duplizieren (Request-Verarbeitung, Validierung, Template-Zuweisung, Weiterleitung), was zu Code-Duplikation und Wartbarkeitsproblemen führt. Bei Shopware-Updates könnten sich die internen Abläufe der `loginAction()` ändern, wodurch der Hook inkompatibel wird. Zudem würde man die bewährte Shopware-Logik für Session-Management, CSRF-Schutz und Template-Integration verlieren oder manuell nachbauen müssen.
 
 ### sAdmin->sLogin() Hook (before/replace): ###
 Das Hooking der sLogin()-Methode ist noch problematischer, da diese Methode zentrale Authentifizierungslogik enthält 
