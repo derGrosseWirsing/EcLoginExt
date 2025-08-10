@@ -45,6 +45,8 @@ Falls Sie Composer verwenden, fügen Sie das Plugin zu Ihrer `composer.json` hin
 ```bash
 composer config repositories.ec-login-ext vcs https://github.com/derGrosseWirsing/EcLoginExt
 composer require dergrossewirsing/ec-login-ext:dev-main
+
+#Updates
 composer update dergrossewirsing/ec-login-ext
 
 # Plugin über die Konsole installieren
@@ -59,7 +61,7 @@ php bin/console sw:theme:compile
 
 ### 2. Datenbank-Migration
 Das Plugin erstellt automatisch bei der Installation:
-- E-Mail-Template `sECSECURELOGINLOCKOUT` für Benachrichtigungen
+- E-Mail-Template `sECSECURELOGINLOCKOUT` für Benachrichtigungen (**Übersetzte Mail-Templates müssen manuell erstellt werden**)
 - Alle erforderlichen Freitextfelder in der `s_user_attributes` Tabelle
 
 ### 3. Template-Integration
