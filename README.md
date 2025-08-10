@@ -39,7 +39,7 @@ Alternativ können Sie das Plugin über das Shopware Backend installieren:
 ## 1.2 Composer-Installation
 Falls Sie Composer verwenden, fügen Sie das Plugin zu Ihrer `composer.json` hinzu:
 ```bash
-composer config repositories.ecloginext vcs https://github.com/derGrosseWirsing/EcLoginExt
+composer config repositories.ec-login-ext vcs https://github.com/derGrosseWirsing/EcLoginExt
 composer require dergrossewirsing/ec-login-ext:dev-main
 composer update dergrossewirsing/ec-login-ext
 
