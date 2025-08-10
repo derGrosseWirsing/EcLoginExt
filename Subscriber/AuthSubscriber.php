@@ -100,7 +100,10 @@ class AuthSubscriber implements SubscriberInterface
             return;
         }
 
-        /** Locked: calculate time difference for the frontend counter */
+        /** Locked: calculate time difference for the frontend counter
+         * @Todo: Implement a more sophisticated way to handle this
+         * e.g. consider zero values for hours and minutes and adjust the message accordingly
+         */
         if ($result['locked'] && $result['lock_until']) {
 
             $then = $result['lock_until'];
