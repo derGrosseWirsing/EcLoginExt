@@ -4,7 +4,7 @@ Ein Shopware 5 Plugin zur Verbesserung der Login-Sicherheit mit erweiterten Sper
 
 ## Features
 
-- **Konfigurierbare Kontosperrung**: Nach 3 fehlgeschlagenen Login-Versuchen wird das Konto f�r 24 Stunden gesperrt
+- **Konfigurierbare Kontosperrung**: Nach 3 fehlgeschlagenen Login-Versuchen wird das Konto für 24 Stunden gesperrt
 - **Doppelte Zählung**: Separate Zähler für aufeinanderfolgende Fehlversuche und Gesamtstatistik
 - **E-Mail-Benachrichtigungen**: Automatischer Versand bei Kontosperrung mit Entsperr-Link
 - **Token-basierte Entsperrung**: Vorzeitige Freischaltung über sicheren Unlock-Token
@@ -87,7 +87,7 @@ Die Textbausteine für Fehlermeldungen und Benachrichtigungen sind im Plugin ent
 und werden bei der Installation automatisch importiert. 
 Sie können diese unter **Einstellungen** > **Textbausteine** anpassen:
 ```bash
-# Snippet-Import in Datenbank
+# Snippet-Import in Datenbank (optional)
 php bin/console sw:snippets:to:db
 
 # Verfügbare Namespaces:
@@ -112,6 +112,9 @@ php bin/console sw:snippets:to:db
 6. **Automatische Entsperrung**: Nach 24(konfigurierbar) Stunden ist das Konto wieder verfügbar
 
 ### Für Shop-Betreiber
+**Monitoring Backend:**
+- Überwachen Sie die Login-Versuche und Sperrungen im Backend unter **Einstellungen** > **E-Mail-Management** > **E-Mail-Log**
+
 **Monitoring über s_mail_log Tabelle:**
 ```sql
 SELECT * FROM s_mail_log WHERE type = 'sECSECURELOGINLOCKOUT' ORDER BY sent_at DESC;
@@ -120,17 +123,17 @@ SELECT * FROM s_mail_log WHERE type = 'sECSECURELOGINLOCKOUT' ORDER BY sent_at D
 Im Backend unter **Kunden** > **Kunden verwalten**:
 1. Suchen Sie den betroffenen Kunden
 2. Klicken Sie auf **Bearbeiten**
-3. Klicken Sie auf "Entsperren"
+3. Klicken Sie auf **Entsperren** (Button erscheint nur bei gesperrtem Konto)
 
 **Manuelle Entsperrung über Datenbank:**
 ```sql
 UPDATE s_user_attributes 
 SET ec_current_failed_attempts = 0, ec_locked_until = NULL 
-WHERE userID = [CUSTOMER_ID];
+WHERE userID = [USER_ID];
 
 UPDATE s_user
 SET lockeduntil = NULL
-WHERE id = [CUSTOMER_ID];
+WHERE id = [USER_ID];
 ```
 
 ## Technische Details
@@ -176,3 +179,19 @@ DELETE FROM s_core_config_mails WHERE name = 'sECSECURELOGINLOCKOUT';
 ## Lizenz
 Dieses Plugin wurde für Shopware 5 entwickelt und folgt den 
 Shopware Plugin-Entwicklungsrichtlinien.
+
+## Entwicklungs-Setup
+- **OS**: Windows 11
+- **Virtualisierung**: Docker mit Docker Desktop
+- **Docker Image**: `dockware/play:5.7.14`
+- **IDE**: PHPStorm 2023.2.3
+
+## Quellen
+- [Shopware 5 Dokumentation](https://docs.shopware.com/en/shopware-5-en)
+- [Shopware 5 Plugin Entwicklung](https://developers.shopware.com/plugin-guide/)
+- [Shopware 5 Code Style Guide](https://developers.shopware.com/developers-guide/coding-standards/)
+- [Shopware 5 Cheatsheet](https://developers.shopware.com/developers-guide/cheat-sheet/)
+- [PHPStorm](https://www.jetbrains.com/de-de/phpstorm/)
+- [Dockware](https://dockware.io/)
+- [Dockware Hub](https://hub.docker.com/u/dockware)
+- [Dockware Play Image](https://hub.docker.com/layers/dockware/play/5.7.14/images/sha256:48dc18673ddd2c0948623bf78813dfbdb0526de7400bc236986cba38eb276d54?context=repo)

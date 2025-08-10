@@ -1,6 +1,6 @@
 ## Shopware 5 Login-Architektur und Herausforderungen
 
-### Standard Shopware-Flow für Fehlgeschlagene Anmeldungen:
+### Standard Shopware-Flow für fehlgeschlagene Anmeldungen:
 
 **Frontend-Login-Prozess:**
 1. Kunde gibt Zugangsdaten im Frontend-Login-Formular ein
@@ -19,15 +19,15 @@
 ### Technische Herausforderungen:
 
 **Limitierte Erweiterbarkeit:**
-- `sAdmin->failedLoginUser()` hat **private Sichtbarkeit** → nicht hookbar
 - `sAdmin->sLogin()` ist eine große Methode mit kritischer Authentifizierungslogik
+- `sAdmin->failedLoginUser()` hat **private Sichtbarkeit** → nicht hookbar
 - Standard-Sperrparameter (10 Versuche, 30 Min) sind **hart im SQL-Statement codiert**
 - Keine Konfigurationsmöglichkeiten für Versuchsanzahl oder Sperrdauer
 - Fehlende E-Mail-Benachrichtigung oder Unlock-Token-System
 
 **Architektur-Beschränkungen:**
 - Shopware Core verwendet direkte SQL-Updates statt Doctrine ORM
-- Keine Trennung zwischen Fehlversuch-Zählung und Sperrlogik  
+- Keine Trennung zwischen Fehlversuch-Zählung und Sperrlogik (Sperrzeit wird trotz evtl. vorhanderner Sperrzeit bei jedem Fehlversuch erhöht) 
 - Session-Management ist tief in sLogin() integriert
 - Template-Integration erfolgt über komplexe Array-Rückgaben
 
@@ -44,12 +44,13 @@
 4. `Shopware_Modules_Admin_Login_FilterResult` (filter) - Modifikation der Fehlermeldungen
 5. `Enlight_Controller_Action_PostDispatch_Frontend_Account` - Template-Integration
 
-Lösung:
+### Lösung: ###
 
 **1. Datenmodell und Persistierung:**
 - Separate Zähler für aufeinanderfolgende Fehlversuche und Gesamtanzahl aller Fehlversuche
-- Sperrzeit-Management mit konfigurierbarer 24-Stunden-Sperre
+- Sperrzeit-Management mit konfigurierbarer 24-Stunden-Sperre und Fehlversuch - Limit
 - Unlock-Token System für vorzeitige Entsperrung
+- Erweiterung der Shopware Backend Entsperrungs-Logik für manuelle Entsperrung
 
 **2. Event-basierte Architektur:**
 - `AuthSubscriber` registriert sich für Shopware Login-Events:
@@ -84,23 +85,21 @@ Lösung:
 Diese Lösung umgeht die Limitierungen der privaten `failedLoginUser()` Methode durch Nutzung der öffentlichen 
 Shopware Events und erweitert das System um moderne Sicherheitsfeatures ohne Core-Änderungen.
 
-**Warum alternative Lösungsansätze problematisch wären:**
+## Warum alternative Lösungsansätze problematisch wären: ##
 
-**AccountController Hook (before/replace):** 
-Ein kompletter Hook des AccountControllers wäre extrem invasiv und würde 
-die gesamte Login-Logik überschreiben müssen. Dies führt zu hoher Code-Duplikation, schwieriger Wartbarkeit und 
-Kompatibilitätsproblemen bei Shopware-Updates. Zudem würde die komplexe Validierungslogik von Shopware verloren gehen.
+### AccountController LoginAction-Hook (before/replace): ### 
+Ein Hook der `loginAction()` Methode wäre weniger invasiv als ein kompletter Controller-Hook, würde aber dennoch erhebliche Probleme verursachen. Man müsste die gesamte Login-Logik der Action duplizieren (Request-Verarbeitung, Validierung, Template-Zuweisung, Weiterleitung), was zu Code-Duplikation und Wartbarkeitsproblemen führt. Bei Shopware-Updates könnten sich die internen Abläufe der `loginAction()` ändern, wodurch der Hook inkompatibel wird. Zudem würde man die bewährte Shopware-Logik für Session-Management, CSRF-Schutz und Template-Integration verlieren oder manuell nachbauen müssen.
 
-**sAdmin->sLogin() Hook (before/replace):** 
+### sAdmin->sLogin() Hook (before/replace): ###
 Das Hooking der sLogin()-Methode ist noch problematischer, da diese Methode zentrale Authentifizierungslogik enthält 
 (Session-Management, Cookie-Handling, Gruppen-Validierung). Ein Replace-Hook würde hunderte Zeilen kritischer 
 Shopware-Funktionalität duplizieren müssen, was bei Updates zu schwerwiegenden Sicherheitslücken führen könnte.
 
-**Core-Modifikationen:** 
+### Core-Modifikationen: ### 
 Direkte Änderungen an Shopware-Kerndateien wären die schlechteste Lösung, da sie bei jedem Update überschrieben werden 
 und das System instabil machen. Außerdem würde dies die Shopware-Lizenz verletzen und Support-Ansprüche zunichte machen.
 
-**Session-/Cookie-basierte Lösungen:** 
+### Session-/Cookie-basierte Lösungen: ### 
 Reine Frontend-Sperren über Sessions oder Cookies bieten keine echte Sicherheit, da sie clientseitig umgangen werden 
 können. Ohne Datenbankpersistierung gehen Sperrdaten bei Server-Neustart verloren.
 
