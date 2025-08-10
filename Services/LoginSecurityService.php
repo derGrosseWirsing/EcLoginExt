@@ -104,6 +104,7 @@ class LoginSecurityService
 
     /**
      * Unlock account using token
+     * @see EcLoginExt/Controllers/Frontend/EcUnlock
      * @todo : If queryBuilder a performance issue, consider using native SQL
      */
     public function unlockWithToken(string $token): array
@@ -257,6 +258,7 @@ class LoginSecurityService
 
     /**
      * Update customer counters in a single batch operation
+     * Shopwares counter is updated to 0 to prevent triggering Shopware's native lock mechanism
      * @todo : If queryBuilder a performance issue, consider using native SQL
      */
     private function updateCustomerCounters(int $customerId, int $shopwareCounter, int $currentFailed, int $totalFailed): void
@@ -365,7 +367,8 @@ class LoginSecurityService
     }
 
     /**
-     * Get customer data by email
+     * Get customer data by email (no guest accounts)
+     * @todo : maybe exclude inactive users as well?
      * @todo : If queryBuilder a performance issue, consider using native SQL
      */
     private function getCustomerDataByEmail(string $email): ?array
@@ -520,6 +523,7 @@ class LoginSecurityService
 
         $this->lockCustomerWithToken($customerId, $lockUntil, $config['enableEmailUnlock'], $this->getConfig());
 
+        /** end transaction, no further updates expected */
         $this->em->commit();
 
         if ($config['enableEmailUnlock']) {
@@ -558,7 +562,7 @@ class LoginSecurityService
         array $config
     ): array
     {
-
+        /** end transaction, no further updates expected */
         $this->em->commit();
 
         $return = [
