@@ -77,7 +77,6 @@ Grundkonfiguration / Plugins / EcLoginExt
 - Maximale Fehlversuche: 3 (Standard)
 - Sperrdauer: 24 Stunden (Standard)  
 - E-Mail-Benachrichtigungen: Aktiviert
-- Debug-Modus: Deaktiviert
 ```
 
 ### E-Mail-Templates anpassen

@@ -77,7 +77,6 @@ class AuthSubscriber implements SubscriberInterface
      */
     public function onLoginFilterResult(Enlight_Event_EventArgs $args): void
     {
-
         $session = $this->session;
 
         if (!$session->get('EcSecureLoginResult')) {
@@ -145,7 +144,7 @@ class AuthSubscriber implements SubscriberInterface
     private function getCustomerByEmail(string $email): ?Customer
     {
         $em = $this->modelManager;
-        return $em->getRepository('Shopware\Models\Customer\Customer')
+        return $em->getRepository(Customer::class)
             ->findOneBy(['email' => $email]);
     }
 

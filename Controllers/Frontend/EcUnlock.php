@@ -3,8 +3,6 @@
 declare(strict_types=1);
 
 use EcLoginExt\Services\LoginSecurityService;
-use Shopware\Models\Customer\Customer;
-use Doctrine\ORM\EntityManager;
 
 /**
  * Shopware Controller for handling account unlock via email token
@@ -17,19 +15,18 @@ class Shopware_Controllers_Frontend_EcUnlock extends Enlight_Controller_Action
 {
     private ?Shopware_Components_Snippet_Manager $snippetManager;
     private ?LoginSecurityService $loginSecurityService = null;
-    private ?EntityManager $em = null;
 
     public function preDispatch(): void
     {
         $this->loginSecurityService = $this->get('ec_login_ext.service.login_security');
-        $this->em = $this->get('models');
     }
 
     /**
      * Handle account unlock via email token
      */
     public function indexAction(): void
-    {   $this->Front()->Plugins()->ViewRenderer()->setNoRender();
+    {
+        $this->Front()->Plugins()->ViewRenderer()->setNoRender();
         $token = $this->Request()->getParam('token');
         $loginSecurityService = $this->loginSecurityService;
         $session = $this->container->get('session');
@@ -84,7 +81,6 @@ class Shopware_Controllers_Frontend_EcUnlock extends Enlight_Controller_Action
         ]);
     }
 
-
     /**
      * Get user-friendly error message for unlock errors
      */
@@ -92,15 +88,11 @@ class Shopware_Controllers_Frontend_EcUnlock extends Enlight_Controller_Action
     {
         $snippets = $this->snippetManager->getNamespace('frontend/ec_login_ext');
 
-        switch ($errorCode) {
-            case 'invalid_token':
-                return $snippets->get('account/unlocked/invalid_token');
-            case 'token_not_found':
-                return $snippets->get('account/unlocked/not_found');
-            case 'token_expired':
-                return $snippets->get('account/unlocked/expired');
-            default:
-                return $snippets->get('account/unlocked/error');
-        }
+        return match ($errorCode) {
+            'invalid_token' => $snippets->get('account/unlocked/invalid_token'),
+            'token_not_found' => $snippets->get('account/unlocked/not_found'),
+            'token_expired' => $snippets->get('account/unlocked/expired'),
+            default => $snippets->get('account/unlocked/error'),
+        };
     }
 }

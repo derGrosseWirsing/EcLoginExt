@@ -13,12 +13,10 @@
 
 {block name="frontend_index_javascript_async_ready"}
 
-   {$smarty.block.parent}
-
+    {$smarty.block.parent}
     <script>
-        document.asyncReady(function() {
-            StateManager.addPlugin('.counterLocked','swCountDown');
+        document.asyncReady(function () {
+            StateManager.addPlugin('.counterLocked', 'swCountDown');
         });
     </script>
-
 {/block}

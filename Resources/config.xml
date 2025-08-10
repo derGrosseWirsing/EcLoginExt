@@ -38,14 +38,5 @@
             <description lang="de">Gültigkeitsdauer des Entsperr-Tokens in Stunden</description>
             <description lang="en">Validity duration of unlock token in hours</description>
         </element>
-        
-        <element type="boolean" required="false" scope="shop">
-            <name>logSecurityEvents</name>
-            <label lang="de">Ereignisse protokollieren</label>
-            <label lang="en">Log Security Events</label>
-            <value>true</value>
-            <description lang="de">Protokolliert alle Sicherheitsereignisse für Audit-Zwecke</description>
-            <description lang="en">Log all security events for audit purposes</description>
-        </element>
     </elements>
 </config>

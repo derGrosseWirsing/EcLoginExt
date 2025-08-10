@@ -14,7 +14,7 @@ use Shopware\Components\Model\ModelManager;
 class AttributesInstaller
 {
     public function __construct(
-        private CrudService $service,
+        private CrudService  $service,
         private ModelManager $models
     )
     {

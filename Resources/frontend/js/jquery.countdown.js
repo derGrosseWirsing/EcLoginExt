@@ -22,6 +22,7 @@
         },
         init: function () {
             var me = this;
+            me.eventNamespace = 'plugin/swCountDown';
             me.applyDataAttributes();
 
             /** Check DOM-Elements */
@@ -57,19 +58,19 @@
             /**
              * onTick fired after every interval tick
              */
-            $.subscribe(me.eventNamespace + '/onTick', function() {
+            $.subscribe(me.eventNamespace + '/onTick', function () {
                 me.updateDisplay();
             });
         },
 
-        startCountdown: function() {
+        startCountdown: function () {
             var me = this;
 
             if (me.totalSeconds <= 0) {
                 return;
             }
 
-            me.timer = setInterval(function() {
+            me.timer = setInterval(function () {
                 if (me.totalSeconds <= 0) {
                     clearInterval(me.timer);
                     me.timer = null;
@@ -83,7 +84,7 @@
             }, 1000);
         },
 
-        updateDisplay: function() {
+        updateDisplay: function () {
             var me = this;
 
             if (!me.$hours || !me.$minutes || !me.$seconds) {
