@@ -120,7 +120,7 @@ php bin/console sw:snippets:to:db
 
 ### Für Shop-Betreiber
 **Monitoring Backend:**
-- Überwachen Sie die Login-Versuche und Sperrungen im Backend unter **Einstellungen** > **E-Mail-Management** > **E-Mail-Log**
+- Überwachen Sie die Sperrungen im Backend unter **Einstellungen** > **E-Mail-Management** > **E-Mail-Log** und die Login-Versuche im Kundenkonto
 
 **Monitoring über s_mail_log Tabelle:**
 ```sql
