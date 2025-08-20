@@ -9,7 +9,7 @@
 4. `sLogin()` validiert Zugangsdaten über `sAdmin->sCheckUser()`
 5. Bei falschen Zugangsdaten ruft `sLogin()` die Methode `sAdmin->failedLoginUser()` auf
 6. `failedLoginUser()` implementiert Shopwares Standard-Sperrmechanismus:
-   - Zählt Fehlversuche in `s_user_attributes.failed_logins`  
+   - Zählt Fehlversuche in `s_user.failed_logins`  
    - Sperrt Account nach 10 Versuchen für 30 Minuten
    - Speichert Sperrzeit in `s_user_attributes.lockeduntil`
 7. `failedLoginUser()` feuert Event `Shopware_Modules_Admin_Login_Failure`
