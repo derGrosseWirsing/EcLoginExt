@@ -11,7 +11,7 @@
 6. `failedLoginUser()` implementiert Shopwares Standard-Sperrmechanismus:
    - Zählt Fehlversuche in `s_user.failed_logins`  
    - Sperrt Account nach 10 Versuchen für 30 Minuten
-   - Speichert Sperrzeit in `s_user_attributes.lockeduntil`
+   - Speichert Sperrzeit in `s_user.lockeduntil`
 7. `failedLoginUser()` feuert Event `Shopware_Modules_Admin_Login_Failure`
 8. `sLogin()` feuert Event `Shopware_Modules_Admin_Login_FilterResult` für Fehlermeldungen
 9. AccountController gibt Fehlermeldungen an Smarty-Template weiter
